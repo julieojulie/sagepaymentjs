@@ -1,0 +1,224 @@
+<?php
+
+
+/**Implement hook_init **/
+function sage_paymentjs_init(){
+ drupal_add_js('https://www.sagepayments.net/pay/1.0.2/js/pay.min.js', 'external');
+
+}
+
+
+
+/**
+ * Implements hook_commerce_payment_method_info().
+ */
+function sage_paymentjs_commerce_payment_method_info() {
+  $payment_methods = array();
+
+
+  $payment_methods['sage_paymentjs'] = array(
+    'base' => 'sage_paymentjs_direct', 
+    'title' => t('Sage PaymentsJS - Credit Card'),
+    'short_title' => t('Sage Payments JS'),
+    'display_title' => t('Credit card - Sage PaymentsJS'),
+    'description' => t('Integrates Sage PaymentJS Method for card not present CC transactions.'),
+
+  );
+
+  return $payment_methods;
+}
+
+
+/**
+ * Returns the default settings for the Authorize.Net AIM payment method.
+ */
+
+/*
+function sage_paymentjs_payments_default_settings() {
+  return array(
+    'sage_paymentjs_merchant_id' => '876724775174',
+    'sage_paymentjs_merchant_key' => 'V8Q1Y5D5W4E2',
+    'sage_paymentjs_server' => 'https://gateway.sagepayments.net/cgi-bin/eftBankcard.dll?transaction',
+    'card_types' => array(),
+    'sage_paymentjs_debug' => 0,
+  );
+}
+*/
+
+/**
+ * Payment method callback: checkout form.
+ */
+function sage_paymentjs_direct_submit_form($payment_method, $pane_values, $checkout_pane, $order) {
+ drupal_add_js(drupal_get_path('module', 'sage_paymentjs').'/js/sage_paymentjs.js');
+  $wrapper = entity_metadata_wrapper('commerce_order', $order);
+  $total = commerce_line_items_total($wrapper->commerce_line_items);
+
+  // Add tax if we have sales tax in the order.
+  $total['amount'] = $wrapper->commerce_order_total->amount->value();
+  $amount = $total['amount']/100;
+  
+  // Load customer profile.
+  $profile = commerce_customer_profile_load($order->commerce_customer_billing[LANGUAGE_NONE][0]['profile_id']);
+  //dpm($profile);return false;
+  // Get user billing address.
+  $billing_address = $profile->commerce_customer_address[LANGUAGE_NONE][0];
+  /* testing key */
+
+  $merchant = [
+        "ID" => "876724775174",
+        "KEY" => "V8Q1Y5D5W4E2" 
+    ];
+
+
+    /* production ids */
+    /*
+  $merchant = [
+        "ID" => "382751733182",
+        "KEY" => "Q4K6T2S9X8V3" 
+    ];
+    */
+    // sign up at https://developer.sagepayments.com/ to get your own dev creds
+    $developer = [
+        "ID" => "8eBNdAveZDL1mkxLuyuttXGi25Rxrtsa",
+        "KEY" => "ia4HkGrcNGkToJPb"
+    ];
+    
+    $request = [
+        "postbackUrl" => "https://www.example.com/myHandler.php", // https://requestb.in is great for playing with this
+        "environment" => "cert",
+        "amount" => $amount, // use 5.00 to simulate a decline
+        "preAuth" => "false"
+    ];
+
+  $nonces = getNonces();
+  $salt = $nonces['salt'];
+
+  $environment = $request['environment'];
+
+  $req = [
+        "merchantId" => $merchant['ID'],
+        "merchantKey" => $merchant['KEY'], // don't include the Merchant Key in the JavaScript initialization!
+        "requestType" => "payment",
+        "orderNumber" => $order->order_id,
+        "orderNumber" => 'orderx'.rand(0,10000),
+        "amount" => $request['amount'],
+        "salt" => $nonces['salt'],
+        "postbackUrl" => $request['postbackUrl'],
+        "preAuth" => $request['preAuth']
+  ]; 
+    
+  $authKey = getAuthKey(json_encode($req), $developer['KEY'], $nonces['salt'], $nonces['iv']);
+  global $base_url;
+
+  $variables = array(
+    0 => $nonces['salt'], 
+    1 => $authKey, 
+    2 => $req['orderNumber'],
+    3 => $req['amount'], 
+    4 => $billing_address, 
+    5 => $merchant['ID'], 
+    6 => $developer['ID'],
+    7 => $base_url);
+
+  drupal_add_js(array('sage_paymentjs' => array('variables' => $variables)), 'setting');
+
+
+
+  $form = array();
+  /*
+  $form['billing_name'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Billing Name'),
+    '#default_value' => 'my order',
+  );
+
+  $form['billing_street'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Billing Street'),
+    '#default_value' => '3375',
+  );
+
+  $form['billing_city'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Billing City'),
+    '#default_value' => 'Atlanta',
+  );
+
+  $form['billing_state'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Billing State'),
+    '#default_value' => 'Georgia',
+  );
+
+  $form['billing_zip'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Billing Zip'),
+    '#default_value' => '30044',
+  );
+*/
+  $form['cc_number'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Number'),
+    '#default_value' => '4111111111111111',
+  );
+
+  $form['cc_expiration'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Expiration'),
+    '#default_value' => '1239',
+  );
+
+  $form['cc_cvv'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Security or CVV code'),
+    '#default_value' => '677',
+  );
+
+  $form['payment_submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Place Order'),
+  );
+
+  $form['payment_response'] = array(
+    '#type' => 'markup',
+    '#markup' =>'<div id="paymentResponse" class="alert alert-success" role="alert"></div>',
+  );
+
+return $form;
+
+}
+
+/**
+ * Payment method callback: checkout form submission.
+ */
+
+function sage_paymentjs_direct_submit_form_validate($payment_method, $pane_form, $pane_values, $order, $form_parents = array()) {
+  return TRUE;
+}
+
+function sage_paymentjs_direct_submit_form_submit($payment_method, $pane_form, $pane_values, $order, $charge) {
+  return TRUE;
+}
+
+
+function getAuthKey($toBeHashed, $password, $salt, $iv){
+    $encryptHash = hash_pbkdf2("sha1", $password, $salt, 1500, 32, true);
+    $encrypted = openssl_encrypt($toBeHashed, "aes-256-cbc", $encryptHash, 0, $iv);
+    return $encrypted;
+}
+
+function getNonces(){
+    $iv = openssl_random_pseudo_bytes(16);
+    $salt = base64_encode(bin2hex($iv));
+    return [
+        "iv" => $iv,
+        "salt" => $salt
+    ];
+}
+
+function getHmac($toBeHashed, $privateKey){
+    return base64_encode(hash_hmac('sha512', $toBeHashed, $privateKey, true));
+}
+
+
+?>
