@@ -4,17 +4,75 @@
 /**Implement hook_init **/
 function sage_paymentjs_init(){
  drupal_add_js('https://www.sagepayments.net/pay/1.0.2/js/pay.min.js', 'external');
-
 }
 
 
+/**
+ * Implements hook_menu().
+ */
+function sage_paymentjs_menu() {
+  return array(
+    'compare_response_and_hash' => array(
+      'page callback' => 'compare_response_and_hash_callback',
+      'access callback' => TRUE,
+      'delivery callback' => 'drupal_json_output',
+    ),
+
+    'sage_paymentjs_log' => array(
+      'page callback' => 'sage_paymentjs_log_callback',
+      'access callback' => TRUE,
+      'delivery callback' => 'drupal_json_output',
+    ),
+
+    'sage_paymentjs_log_error' => array(
+      'page callback' => 'sage_paymentjs_log_error_callback',
+      'access callback' => TRUE,
+      'delivery callback' => 'drupal_json_output',
+    ),
+  );
+}
+
+/**
+ * Page callback.
+ */
+
+function compare_response_and_hash_callback() {
+
+  // Merge default settings into the stored settings array.
+  $settings = (array) $settings + sage_paymentjs_payments_default_settings();
+
+  $key = $settings['sage_paymentjs_developer_key'];
+  $json = file_get_contents('php://input');
+
+  $results = [
+      'hash' => base64_encode(hash_hmac('sha512', $json, $key, true)),
+  ];
+  echo json_encode($results);
+}
+
+function sage_paymentjs_log_callback() {
+  //if (user_access('save_watchdog_js_errors')) {
+    $json = file_get_contents('php://input');
+    $data = json_decode($json, true);
+    watchdog('sage_paymentjs', 'API Response: Order #:order :status :log', array(':order' => $data['requestId'], ':status'=>$data['gatewayResponse']['status'], ':log' => $json), WATCHDOG_NOTICE);
+ // }
+}
+
+function sage_paymentjs_log_error_callback() {
+  $id = variable_get('sage_paymentjs_merchant_id');
+  var_dump('id '.$id);
+  //if (user_access('save_watchdog_js_errors')) {
+    $json = file_get_contents('php://input');
+    $data = json_decode($json, true);
+    watchdog('sage_paymentjs', 'Response and HASH not match, Void transaction: #:order :status :log', array(':order'=>$data['requestId'], ':status'=>$data['gatewayResponse']['status'], ':log' => $json), WATCHDOG_ERROR);
+ // }
+}
 
 /**
  * Implements hook_commerce_payment_method_info().
  */
 function sage_paymentjs_commerce_payment_method_info() {
   $payment_methods = array();
-
 
   $payment_methods['sage_paymentjs'] = array(
     'base' => 'sage_paymentjs_direct', 
@@ -28,22 +86,21 @@ function sage_paymentjs_commerce_payment_method_info() {
   return $payment_methods;
 }
 
-
-/**
- * Returns the default settings for the Authorize.Net AIM payment method.
- */
-
-/*
 function sage_paymentjs_payments_default_settings() {
   return array(
     'sage_paymentjs_merchant_id' => '876724775174',
     'sage_paymentjs_merchant_key' => 'V8Q1Y5D5W4E2',
+    'sage_paymentjs_developer_id' => '8eBNdAveZDL1mkxLuyuttXGi25Rxrtsa',
+    'sage_paymentjs_developer_key' => 'ia4HkGrcNGkToJPb',
     'sage_paymentjs_server' => 'https://gateway.sagepayments.net/cgi-bin/eftBankcard.dll?transaction',
+    'sage_paymentjs_request' => array( 
+        "postbackUrl" => "https://www.example.com/myHandler.php", // https://requestb.in is great for playing with this
+        "environment" => "cert",
+        "preAuth" => "false"), 
     'card_types' => array(),
     'sage_paymentjs_debug' => 0,
   );
 }
-*/
 
 /**
  * Payment method callback: checkout form.
@@ -63,12 +120,14 @@ function sage_paymentjs_direct_submit_form($payment_method, $pane_values, $check
   // Get user billing address.
   $billing_address = $profile->commerce_customer_address[LANGUAGE_NONE][0];
   /* testing key */
+  
+  // Merge default settings into the stored settings array.
+  $settings = (array) $settings + sage_paymentjs_payments_default_settings();
 
   $merchant = [
-        "ID" => "876724775174",
-        "KEY" => "V8Q1Y5D5W4E2" 
-    ];
-
+        "ID" => $settings['sage_paymentjs_merchant_id'],
+        "KEY" => $settings['sage_paymentjs_merchant_key'],
+  ];
 
     /* production ids */
     /*
@@ -79,16 +138,19 @@ function sage_paymentjs_direct_submit_form($payment_method, $pane_values, $check
     */
     // sign up at https://developer.sagepayments.com/ to get your own dev creds
     $developer = [
-        "ID" => "8eBNdAveZDL1mkxLuyuttXGi25Rxrtsa",
-        "KEY" => "ia4HkGrcNGkToJPb"
+        "ID" => $settings['sage_paymentjs_developer_id'],
+        "KEY" => $settings['sage_paymentjs_developer_key'],
     ];
-    
+    /*
     $request = [
         "postbackUrl" => "https://www.example.com/myHandler.php", // https://requestb.in is great for playing with this
         "environment" => "cert",
         "amount" => $amount, // use 5.00 to simulate a decline
         "preAuth" => "false"
-    ];
+    ];*/
+
+    $request = $settings['sage_paymentjs_request'];
+    $request["amount"] = $amount; // use 5.00 to simulate a decline
 
   $nonces = getNonces();
   $salt = $nonces['salt'];
@@ -100,7 +162,6 @@ function sage_paymentjs_direct_submit_form($payment_method, $pane_values, $check
         "merchantKey" => $merchant['KEY'], // don't include the Merchant Key in the JavaScript initialization!
         "requestType" => "payment",
         "orderNumber" => $order->order_id,
-        "orderNumber" => 'orderx'.rand(0,10000),
         "amount" => $request['amount'],
         "salt" => $nonces['salt'],
         "postbackUrl" => $request['postbackUrl'],

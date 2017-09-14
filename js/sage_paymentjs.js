@@ -53,6 +53,8 @@ jQuery(document ).ready(function() {
                     hash = $RESPONSE.getResponseHash().hash;
                 console.log(resp);
                 console.log(hash);
+
+                
                 // compare response
                 compareResponseandHash(resp, hash);
 
@@ -99,20 +101,40 @@ jQuery(document ).ready(function() {
         })
 
         function compareResponseandHash(resp, hash){
-            //alert(resp);
             $.post(
-                variables[7] + "/sites/all/modules/custom/sage_paymentjs/js/verify.php",
+                "/compare_response_and_hash",
                 resp, // sage response string
                 function(r) {
                     var calcHash = r.hash;
+                    //var calcHash = 'wonder';
+                    //alert(r.hash);
                     if(hash === calcHash){
                         $("#edit-continue").click(); // complete checkout
+                        logTransaction(resp);
                     }
                     else{
                         alert('Oops, there is a problem with your payment, please submit again.');
+                        logTransactionError(resp);
                     }
                 },
                 "json"
+            );
+        }
+
+        function logTransaction(resp){
+            $.post(
+              "/sage_paymentjs_log",
+              resp,
+              "json"
+            );
+        }
+
+        function logTransactionError(resp){
+            $.post(
+              "/sage_paymentjs_log_error",
+              resp,
+              function(r) { alert(r);},
+              "json"
             );
         }
 
